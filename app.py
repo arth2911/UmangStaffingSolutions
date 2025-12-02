@@ -1,237 +1,342 @@
 import streamlit as st
-from src.db_connection import get_connection
 import mysql.connector
-from mysql.connector import Error
+import pandas as pd
+from src.auth import check_login, show_logout_button
 
 # Page configuration
 st.set_page_config(
-    page_title="Umang Staffing Solutions",
+    page_title="Umang Staffing Solutions - Employee Dashboard",
     page_icon="👔",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom CSS
-st.markdown("""
-    <style>
-    .main-header {
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 30px;
-    }
-    .success-box {
-        background-color: #d4edda;
-        padding: 15px;
-        border-radius: 5px;
-        border-left: 4px solid #28a745;
-    }
-    .info-box {
-        background-color: #d1ecf1;
-        padding: 15px;
-        border-radius: 5px;
-        border-left: 4px solid #17a2b8;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Check login
+check_login()
 
-# Initialize session state
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'page' not in st.session_state:
-    st.session_state.page = "Home"
+# Database connection function
+@st.cache_resource
+def get_connection():
+    """Create a MySQL database connection"""
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="",  # Empty password for XAMPP default
+            database="staffing_db",
+            port=3306
+        )
+        return conn
+    except Exception as e:
+        st.error(f"Database connection error: {e}")
+        st.info("Make sure XAMPP MySQL is running!")
+        return None
 
-# Sidebar Navigation
-st.sidebar.title("🔷 Umang Staffing Solutions")
-st.sidebar.markdown("---")
+# Query execution function
+def execute_query(conn, query, params=None):
+    """Execute a query and return results as DataFrame"""
+    try:
+        if params:
+            df = pd.read_sql_query(query, conn, params=params)
+        else:
+            df = pd.read_sql_query(query, conn)
+        return df
+    except Exception as e:
+        st.error(f"Query error: {e}")
+        return None
 
-if not st.session_state.logged_in:
-    st.sidebar.info("Please test the database connection first.")
-else:
-    st.sidebar.success("✓ Database Connected")
-
-# Main Navigation Menu
-page = st.sidebar.radio(
-    "Navigation",
-    ["Home", "Candidates", "Clients", "Job Applications", "Placements", "Settings"],
-    key="nav_radio"
-)
-
-st.session_state.page = page
-
-# Home Page
-if page == "Home":
-    st.markdown('<h1 class="main-header">👔 Umang Staffing Solutions</h1>', unsafe_allow_html=True)
+# Main app
+def main():
+    st.title("💼 Umang Staffing Solutions")
+    st.write(f"Welcome back, **{st.session_state.employee_name}**! 👋")
     
+    # Sidebar navigation
+    with st.sidebar:
+        st.header("📊 Employee Dashboard")
+        
+        # Show logout button
+        show_logout_button()
+        
+        st.divider()
+        st.header("Navigation")
+        page = st.radio("Select Page:", [
+            "Dashboard",
+            "Clients",
+            "Candidates", 
+            "Jobs",
+            "Placements",
+            "Custom Query"
+        ])
+    
+    # Get database connection
+    conn = get_connection()
+    if not conn:
+        st.error("❌ Cannot connect to database. Make sure XAMPP MySQL is running!")
+        st.stop()
+    
+    # Route to different pages
+    if page == "Dashboard":
+        show_dashboard(conn)
+    elif page == "Clients":
+        show_clients(conn)
+    elif page == "Candidates":
+        show_candidates(conn)
+    elif page == "Jobs":
+        show_jobs(conn)
+    elif page == "Placements":
+        show_placements(conn)
+    elif page == "Custom Query":
+        show_custom_query(conn)
+
+def show_dashboard(conn):
+    """Dashboard with key metrics"""
+    st.header("📊 Dashboard Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Total Clients
+    clients_count = execute_query(conn, "SELECT COUNT(*) as count FROM Clients")
+    col1.metric("Total Clients", clients_count['count'].iloc[0] if clients_count is not None else 0)
+    
+    # Total Candidates
+    candidates_count = execute_query(conn, "SELECT COUNT(*) as count FROM Candidates")
+    col2.metric("Total Candidates", candidates_count['count'].iloc[0] if candidates_count is not None else 0)
+    
+    # Active Jobs
+    jobs_count = execute_query(conn, "SELECT COUNT(*) as count FROM JOBS WHERE IsOpen = 1")
+    col3.metric("Active Jobs", jobs_count['count'].iloc[0] if jobs_count is not None else 0)
+    
+    # Total Placements
+    placements_count = execute_query(conn, "SELECT COUNT(*) as count FROM PLACEMENTS")
+    col4.metric("Total Placements", placements_count['count'].iloc[0] if placements_count is not None else 0)
+    
+    st.divider()
+    
+    # Recent activity
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Recent Job Postings")
+        recent_jobs = execute_query(conn, """
+            SELECT j.JobTitle, c.CompanyName, j.DatePosted, j.IsOpen 
+            FROM JOBS j
+            JOIN Clients c ON j.ClientID = c.ClientID
+            ORDER BY j.DatePosted DESC 
+            LIMIT 5
+        """)
+        if recent_jobs is not None and not recent_jobs.empty:
+            st.dataframe(recent_jobs, use_container_width=True, hide_index=True)
+        else:
+            st.info("No recent jobs")
+    
+    with col2:
+        st.subheader("Recent Placements")
+        recent_placements = execute_query(conn, """
+            SELECT p.PlacementID, p.StartDate, p.FinalPayRate,
+                   c.FirstName, c.LastName, j.JobTitle
+            FROM PLACEMENTS p
+            JOIN Candidates c ON p.CandidateID = c.CandidateID
+            JOIN JOBS j ON p.JobID = j.JobID
+            ORDER BY p.StartDate DESC 
+            LIMIT 5
+        """)
+        if recent_placements is not None and not recent_placements.empty:
+            st.dataframe(recent_placements, use_container_width=True, hide_index=True)
+        else:
+            st.info("No recent placements")
+
+def show_clients(conn):
+    """Clients page"""
+    st.header("🏢 Clients")
+    
+    # View selector
+    view_type = st.selectbox("Select View:", ["All Clients", "Technology Clients"])
+    
+    if view_type == "All Clients":
+        query = "SELECT * FROM Clients ORDER BY CompanyName"
+    else:
+        query = "SELECT * FROM vw_technologyclients ORDER BY CompanyName"
+    
+    df = execute_query(conn, query)
+    
+    if df is not None and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Download button
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download as CSV",
+            data=csv,
+            file_name="clients.csv",
+            mime="text/csv"
+        )
+        
+        st.metric("Total Clients", len(df))
+    else:
+        st.info("No clients found")
+
+def show_candidates(conn):
+    """Candidates page"""
+    st.header("👥 Candidates")
+    
+    # Filters
+    col1, col2 = st.columns(2)
+    with col1:
+        skill_filter = st.text_input("Filter by Skill:", "")
+    with col2:
+        st.write("")  # Placeholder for alignment
+    
+    # Build query with GROUP_CONCAT for MySQL
+    query = """
+        SELECT c.CandidateID, c.FirstName, c.LastName, c.Email, c.Phone, c.City, c.State,
+               GROUP_CONCAT(s.SkillName SEPARATOR ', ') as skills
+        FROM Candidates c
+        LEFT JOIN CANDIDATE_SKILLS cs ON c.CandidateID = cs.CandidateID
+        LEFT JOIN Skills s ON cs.SkillID = s.SkillID
+    """
+    
+    conditions = []
+    if skill_filter:
+        conditions.append(f"s.SkillName LIKE '%{skill_filter}%'")
+    
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    
+    query += " GROUP BY c.CandidateID ORDER BY c.FirstName, c.LastName"
+    
+    df = execute_query(conn, query)
+    
+    if df is not None and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.metric("Total Candidates", len(df))
+    else:
+        st.info("No candidates found")
+
+def show_jobs(conn):
+    """Jobs page"""
+    st.header("💼 Job Postings")
+    
+    # Filters
     col1, col2, col3 = st.columns(3)
-    
     with col1:
-        st.metric("Total Candidates", "0", help="Total registered candidates")
+        isopen_filter = st.selectbox("Status:", ["All", "Open", "Closed"])
     with col2:
-        st.metric("Active Jobs", "0", help="Currently open positions")
+        job_type_filter = st.selectbox("Job Type:", ["All", "Full-Time", "Contract", "Temp-to-Hire"])
     with col3:
-        st.metric("Placements", "0", help="Successful placements")
+        search_term = st.text_input("Search Job Title:", "")
     
-    st.markdown("---")
+    # Build query
+    query = "SELECT * FROM JOBS WHERE 1=1"
     
-    # Test Database Connection
-    st.subheader("🔗 Database Connection Status")
+    if isopen_filter == "Open":
+        query += f" AND IsOpen = 1"
+    elif isopen_filter == "Closed":
+        query += f" AND IsOpen = 0"
+    if job_type_filter != "All":
+        query += f" AND JobType = '{job_type_filter}'"
+    if search_term:
+        query += f" AND JobTitle LIKE '%{search_term}%'"
     
-    col1, col2 = st.columns(2)
+    query += " ORDER BY DatePosted DESC"
     
-    with col1:
-        if st.button("Test Database Connection", use_container_width=True):
-            try:
-                connection = get_connection()
-                if connection and connection.is_connected():
-                    st.session_state.logged_in = True
-                    st.success("✓ Successfully connected to database!")
-                    
-                    # Get database info
-                    cursor = connection.cursor()
-                    cursor.execute("SELECT DATABASE();")
-                    db_name = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (db_name,))
-                    table_count = cursor.fetchone()[0]
-                    
-                    st.markdown(f"""
-                    <div class="success-box">
-                    <strong>Database Info:</strong><br>
-                    Database: {db_name}<br>
-                    Tables: {table_count}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    cursor.close()
-                else:
-                    st.error("❌ Connection failed. Check your credentials.")
-            except Error as e:
-                st.error(f"❌ Database Error: {e}")
-            except KeyError as e:
-                st.error(f"❌ Configuration Error: Missing {e}")
+    df = execute_query(conn, query)
     
-    with col2:
-        if st.button("Reset Connection", use_container_width=True):
-            st.session_state.logged_in = False
-            st.info("Connection reset. Click 'Test Connection' to reconnect.")
-    
-    st.markdown("---")
-    st.info("📋 Use the navigation menu to access different modules of the staffing solution.")
-
-# Candidates Page
-elif page == "Candidates":
-    st.title("👤 Candidates Management")
-    
-    if not st.session_state.logged_in:
-        st.warning("⚠️ Please test the database connection from Home page first.")
+    if df is not None and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Statistics
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Jobs", len(df))
+        col2.metric("Open Positions", len(df[df['IsOpen'] == 1]) if 'IsOpen' in df.columns else 0)
+        col3.metric("Avg Pay Rate", f"${df['PayRate'].mean():,.2f}" if 'PayRate' in df.columns else "N/A")
     else:
-        tab1, tab2, tab3 = st.tabs(["Search", "Add New", "View All"])
-        
-        with tab1:
-            st.subheader("Search Candidates")
-            search_query = st.text_input("Enter candidate email or name:")
-            if st.button("Search"):
-                st.info("Search functionality to be implemented")
-        
-        with tab2:
-            st.subheader("Add New Candidate")
-            st.text_input("First Name")
-            st.text_input("Last Name")
-            st.text_input("Email")
-            st.text_input("Phone")
-            if st.button("Add Candidate"):
-                st.info("Add candidate functionality to be implemented")
-        
-        with tab3:
-            st.subheader("All Candidates")
-            st.info("View all candidates functionality to be implemented")
+        st.info("No jobs found")
 
-# Clients Page
-elif page == "Clients":
-    st.title("🏢 Clients Management")
+def show_placements(conn):
+    """Placements page"""
+    st.header("✅ Placements")
     
-    if not st.session_state.logged_in:
-        st.warning("⚠️ Please test the database connection from Home page first.")
+    # View selector
+    view_type = st.selectbox("Select View:", ["All Placements", "Placement History"])
+    
+    if view_type == "All Placements":
+        query = """
+            SELECT p.PlacementID, p.StartDate, p.HireDate, p.FinalPayRate,
+                   c.FirstName, c.LastName, j.JobTitle, cl.CompanyName
+            FROM PLACEMENTS p
+            JOIN Candidates c ON p.CandidateID = c.CandidateID
+            JOIN JOBS j ON p.JobID = j.JobID
+            JOIN Clients cl ON j.ClientID = cl.ClientID
+            ORDER BY p.StartDate DESC
+        """
     else:
-        tab1, tab2, tab3 = st.tabs(["Search", "Add New", "View All"])
-        
-        with tab1:
-            st.subheader("Search Clients")
-            search_query = st.text_input("Enter client name or industry:")
-            if st.button("Search"):
-                st.info("Search functionality to be implemented")
-        
-        with tab2:
-            st.subheader("Add New Client")
-            st.text_input("Company Name")
-            st.text_input("Industry")
-            st.text_input("Contact Person")
-            st.text_input("Email")
-            if st.button("Add Client"):
-                st.info("Add client functionality to be implemented")
-        
-        with tab3:
-            st.subheader("All Clients")
-            st.info("View all clients functionality to be implemented")
-
-# Job Applications Page
-elif page == "Job Applications":
-    st.title("📋 Job Applications")
+        query = "SELECT * FROM vw_candidateplacementhistory ORDER BY StartDate DESC"
     
-    if not st.session_state.logged_in:
-        st.warning("⚠️ Please test the database connection from Home page first.")
+    df = execute_query(conn, query)
+    
+    if df is not None and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Statistics
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Placements", len(df))
+        if 'FinalPayRate' in df.columns:
+            col2.metric("Avg Pay Rate", f"${df['FinalPayRate'].mean():,.2f}")
+            col3.metric("Total Paid", f"${df['FinalPayRate'].sum():,.2f}")
     else:
-        st.subheader("Active Job Applications")
-        st.info("Job applications view functionality to be implemented")
+        st.info("No placements found")
 
-# Placements Page
-elif page == "Placements":
-    st.title("✅ Placements")
+def show_custom_query(conn):
+    """Custom SQL query page"""
+    st.header("🔍 Custom Query")
     
-    if not st.session_state.logged_in:
-        st.warning("⚠️ Please test the database connection from Home page first.")
-    else:
-        st.subheader("Placement History")
-        st.info("Placement history functionality to be implemented")
+    st.info("Write your own SQL queries to explore the database")
+    
+    # Query input
+    query = st.text_area("Enter SQL Query:", height=150, 
+                        placeholder="SELECT * FROM Clients LIMIT 10")
+    
+    if st.button("Execute Query", type="primary"):
+        if query.strip():
+            df = execute_query(conn, query)
+            
+            if df is not None:
+                st.success(f"Query executed successfully! Returned {len(df)} rows")
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                
+                # Download option
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Results",
+                    data=csv,
+                    file_name="query_results.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.warning("Please enter a query")
+    
+    # Sample queries
+    with st.expander("📝 Sample Queries"):
+        st.code("""
+-- Get top 10 candidates with most skills
+SELECT c.first_name, c.last_name, COUNT(cs.skill_id) as skill_count
+FROM Candidates c
+JOIN CANDIDATE_SKILLS cs ON c.candidate_id = cs.candidate_id
+GROUP BY c.candidate_id
+ORDER BY skill_count DESC
+LIMIT 10;
 
-# Settings Page
-elif page == "Settings":
-    st.title("⚙️ Settings")
-    
-    st.subheader("Database Configuration")
-    st.info("Current database credentials are stored in `.streamlit/secrets.toml`")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("View Database Status"):
-            try:
-                connection = get_connection()
-                if connection and connection.is_connected():
-                    st.success("✓ Database is connected")
-                    cursor = connection.cursor()
-                    cursor.execute("SELECT DATABASE();")
-                    db_name = cursor.fetchone()[0]
-                    st.write(f"Connected to: **{db_name}**")
-                    cursor.close()
-            except Error as e:
-                st.error(f"Error: {e}")
-    
-    with col2:
-        if st.button("Clear Cache"):
-            st.cache_resource.clear()
-            st.success("✓ Cache cleared!")
-    
-    st.markdown("---")
-    st.subheader("Application Info")
-    st.write("**Version:** 1.0.0")
-    st.write("**Framework:** Streamlit")
-    st.write("**Database:** MySQL")
+-- Get active job applications
+SELECT * FROM vw_activejobapplications;
 
-# Footer
-st.markdown("---")
-st.markdown(
-    "<p style='text-align: center; color: gray; font-size: 12px;'>"
-    "Umang Staffing Solutions © 2025 | All Rights Reserved"
-    "</p>",
-    unsafe_allow_html=True
-)
+-- Get clients by industry
+SELECT industry, COUNT(*) as client_count
+FROM Clients
+GROUP BY industry
+ORDER BY client_count DESC;
+
+-- Show all tables
+SHOW TABLES;
+        """)
+
+if __name__ == "__main__":
+    main()

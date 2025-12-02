@@ -1,5 +1,0 @@
-# Ignore secrets file - never commit sensitive data
-secrets.toml
-*.toml.bak
-.env
-.env.local
