@@ -188,8 +188,7 @@ def show_candidates(conn):
     # Build query with GROUP_CONCAT for MySQL
     query = """
         SELECT c.CandidateID, c.FirstName, c.LastName, c.Email, c.Phone, c.City, c.State,
-               c.ResumeURL,
-               GROUP_CONCAT(s.SkillName SEPARATOR ', ') as Skills
+               GROUP_CONCAT(s.SkillName SEPARATOR ', ') as skills
         FROM Candidates c
         LEFT JOIN CANDIDATE_SKILLS cs ON c.CandidateID = cs.CandidateID
         LEFT JOIN Skills s ON cs.SkillID = s.SkillID
@@ -208,13 +207,6 @@ def show_candidates(conn):
     
     if df is not None and not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Show resume links
-        st.subheader("📄 Resume Links")
-        for idx, row in df.iterrows():
-            if pd.notna(row['ResumeURL']) and row['ResumeURL']:
-                st.markdown(f"[{row['FirstName']} {row['LastName']}]({row['ResumeURL']})")
-        
         st.metric("Total Candidates", len(df))
     else:
         st.info("No candidates found")
@@ -223,41 +215,121 @@ def show_jobs(conn):
     """Jobs page"""
     st.header("💼 Job Postings")
     
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        isopen_filter = st.selectbox("Status:", ["All", "Open", "Closed"])
-    with col2:
-        job_type_filter = st.selectbox("Job Type:", ["All", "Full-Time", "Contract", "Temp-to-Hire"])
-    with col3:
-        search_term = st.text_input("Search Job Title:", "")
+    # Create tabs for different views
+    tab1, tab2 = st.tabs(["Job Listings", "Find Matching Candidates"])
     
-    # Build query
-    query = "SELECT * FROM JOBS WHERE 1=1"
-    
-    if isopen_filter == "Open":
-        query += f" AND IsOpen = 1"
-    elif isopen_filter == "Closed":
-        query += f" AND IsOpen = 0"
-    if job_type_filter != "All":
-        query += f" AND JobType = '{job_type_filter}'"
-    if search_term:
-        query += f" AND JobTitle LIKE '%{search_term}%'"
-    
-    query += " ORDER BY DatePosted DESC"
-    
-    df = execute_query(conn, query)
-    
-    if df is not None and not df.empty:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Statistics
+    with tab1:
+        # Filters
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Jobs", len(df))
-        col2.metric("Open Positions", len(df[df['IsOpen'] == 1]) if 'IsOpen' in df.columns else 0)
-        col3.metric("Avg Pay Rate", f"${df['PayRate'].mean():,.2f}" if 'PayRate' in df.columns else "N/A")
-    else:
-        st.info("No jobs found")
+        with col1:
+            isopen_filter = st.selectbox("Status:", ["All", "Open", "Closed"])
+        with col2:
+            job_type_filter = st.selectbox("Job Type:", ["All", "Full-Time", "Contract", "Temp-to-Hire"])
+        with col3:
+            search_term = st.text_input("Search Job Title:", "")
+        
+        # Build query
+        query = "SELECT * FROM JOBS WHERE 1=1"
+        
+        if isopen_filter == "Open":
+            query += f" AND IsOpen = 1"
+        elif isopen_filter == "Closed":
+            query += f" AND IsOpen = 0"
+        if job_type_filter != "All":
+            query += f" AND JobType = '{job_type_filter}'"
+        if search_term:
+            query += f" AND JobTitle LIKE '%{search_term}%'"
+        
+        query += " ORDER BY DatePosted DESC"
+        
+        df = execute_query(conn, query)
+        
+        if df is not None and not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Statistics
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Jobs", len(df))
+            col2.metric("Open Positions", len(df[df['IsOpen'] == 1]) if 'IsOpen' in df.columns else 0)
+            col3.metric("Avg Pay Rate", f"${df['PayRate'].mean():,.2f}" if 'PayRate' in df.columns else "N/A")
+        else:
+            st.info("No jobs found")
+    
+    with tab2:
+        st.subheader("🔍 Find Matching Candidates")
+        st.write("Find candidates whose skills match job requirements")
+        
+        # Get list of jobs for selection
+        jobs_query = "SELECT JobID, JobTitle, CompanyName FROM JOBS j JOIN Clients c ON j.ClientID = c.ClientID WHERE j.IsOpen = 1 ORDER BY j.DatePosted DESC"
+        jobs_df = execute_query(conn, jobs_query)
+        
+        if jobs_df is not None and not jobs_df.empty:
+            job_options = {f"{row['JobTitle']} - {row['CompanyName']}": row['JobID'] for _, row in jobs_df.iterrows()}
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_job = st.selectbox("Select Job:", list(job_options.keys()))
+            with col2:
+                min_match = st.slider("Minimum Match %:", 0, 100, 50)
+            
+            selected_job_id = job_options[selected_job]
+            
+            if st.button("Find Matching Candidates", type="primary", use_container_width=True):
+                matching_candidates = find_matching_candidates(conn, selected_job_id, min_match)
+                
+                if matching_candidates is not None and not matching_candidates.empty:
+                    st.success(f"Found {len(matching_candidates)} matching candidates")
+                    
+                    # Display with better formatting
+                    for idx, candidate in matching_candidates.iterrows():
+                        with st.container(border=True):
+                            col1, col2, col3 = st.columns([2, 1, 1])
+                            
+                            with col1:
+                                st.markdown(f"**👤 {candidate['CandidateName']}**")
+                                st.caption(f"📧 {candidate['Email']}")
+                                st.caption(f"📞 {candidate['Phone']}")
+                                st.caption(f"📍 {candidate['City']}, {candidate['State']}")
+                            
+                            with col2:
+                                st.metric("Match %", f"{candidate['MatchPercentage']}%")
+                                st.metric("Skills", f"{candidate['MatchingSkills']}/{candidate['RequiredSkills']}")
+                            
+                            with col3:
+                                if candidate['Skills'] != 'No matching skills':
+                                    st.write("**Skills:**")
+                                    st.caption(candidate['Skills'])
+                    
+                    # Download option
+                    csv = matching_candidates.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Results",
+                        data=csv,
+                        file_name="matching_candidates.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("No matching candidates found with the specified criteria")
+        else:
+            st.info("No open jobs available")
+
+def find_matching_candidates(conn, job_id, min_match_percentage):
+    """Call stored procedure to find matching candidates"""
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.callproc('sp_FindMatchingCandidates_v2', [job_id, min_match_percentage])
+        
+        # Get results from first result set
+        results = cursor.fetchall()
+        cursor.close()
+        
+        if results:
+            return pd.DataFrame(results)
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error finding matching candidates: {e}")
+        return None
 
 def show_placements(conn):
     """Placements page"""
