@@ -13,6 +13,11 @@ st.set_page_config(
 # Check login
 check_login()
 
+
+#itialize small session state flag for HR form
+if 'show_add_hr' not in st.session_state:
+
+    st.session_state['show_add_hr'] = False
 # Database connection function
 @st.cache_resource
 def get_connection():
@@ -22,7 +27,7 @@ def get_connection():
             host="localhost",
             user="root",
             password="",  # Empty password for XAMPP default
-            database="staffing_db",
+            database="Umang_staffing_db",
             port=3306
         )
         return conn
@@ -64,6 +69,7 @@ def main():
             "Candidates", 
             "Jobs",
             "Placements",
+            "HR",
             "Custom Query"
         ])
     
@@ -84,6 +90,8 @@ def main():
         show_jobs(conn)
     elif page == "Placements":
         show_placements(conn)
+    elif page == "HR":
+        show_hr(conn)
     elif page == "Custom Query":
         show_custom_query(conn)
 
@@ -364,6 +372,74 @@ def show_placements(conn):
             col3.metric("Total Paid", f"${df['FinalPayRate'].sum():,.2f}")
     else:
         st.info("No placements found")
+
+# Show HR page
+def show_hr(conn):
+    """HR list page with Add New HR button"""
+    st.header("👔 HR / Recruiters")
+
+    # Toggle to form
+    # col1, col2 = st.columns([1, 3])
+    # with col1:
+    #     if st.button("➕ Add New HR"):
+    #         st.session_state['show_add_hr'] = True
+    # with col2:
+    #     st.write("")  # alignment
+    
+    if st.session_state.get('show_add_hr'):
+        show_add_hr(conn)
+        return
+
+    # List HR records
+    df = execute_query(conn, "SELECT HR_ID, FirstName, LastName, Email, Clients.CompanyName FROM HR JOIN Clients ON HR.ClientID = Clients.ClientID ORDER BY LastName, FirstName")
+    if df is not None and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download HR List",
+            data=csv,
+            file_name="hr_list.csv",
+            mime="text/csv"
+        )
+        st.metric("Total HR", len(df))
+    else:
+        st.info("No HR records found")
+
+# def show_add_hr(conn):
+#     """Form to add a new HR record"""
+#     st.header("➕ Add New HR")
+
+#     with st.form("add_hr_form"):
+#         col1, col2 = st.columns(2)
+#         with col1:
+#             first_name = st.text_input("First Name", "")
+#             last_name = st.text_input("Last Name", "")
+#             role = st.text_input("Role / Title", "")
+#         with col2:
+#             email = st.text_input("Email", "")
+#             phone = st.text_input("Phone", "")
+
+#         submit = st.form_submit_button("Create HR")
+
+#     if st.button("Cancel"):
+#         st.session_state['show_add_hr'] = False
+#         st.experimental_rerun()
+
+#     if submit:
+#         # Basic validation
+#         if not first_name.strip() or not last_name.strip() or not email.strip():
+#             st.warning("Please provide First Name, Last Name and Email.")
+#             return
+
+#         ok = add_hr_to_db(conn, first_name.strip(), last_name.strip(), email.strip(), phone.strip(), role.strip())
+#         if ok:
+#             st.success("HR record created successfully.")
+#             st.session_state['show_add_hr'] = False
+#             # refresh page to show updated list
+#             st.experimental_rerun()
+#         else:
+#             st.error("Failed to create HR record. See error message above.")
+
 
 def show_custom_query(conn):
     """Custom SQL query page"""
