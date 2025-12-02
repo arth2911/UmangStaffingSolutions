@@ -188,7 +188,8 @@ def show_candidates(conn):
     # Build query with GROUP_CONCAT for MySQL
     query = """
         SELECT c.CandidateID, c.FirstName, c.LastName, c.Email, c.Phone, c.City, c.State,
-               GROUP_CONCAT(s.SkillName SEPARATOR ', ') as skills
+               c.ResumeURL,
+               GROUP_CONCAT(s.SkillName SEPARATOR ', ') as Skills
         FROM Candidates c
         LEFT JOIN CANDIDATE_SKILLS cs ON c.CandidateID = cs.CandidateID
         LEFT JOIN Skills s ON cs.SkillID = s.SkillID
@@ -207,6 +208,13 @@ def show_candidates(conn):
     
     if df is not None and not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Show resume links
+        st.subheader("📄 Resume Links")
+        for idx, row in df.iterrows():
+            if pd.notna(row['ResumeURL']) and row['ResumeURL']:
+                st.markdown(f"[{row['FirstName']} {row['LastName']}]({row['ResumeURL']})")
+        
         st.metric("Total Candidates", len(df))
     else:
         st.info("No candidates found")
