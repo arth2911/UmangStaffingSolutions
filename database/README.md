@@ -23,9 +23,7 @@
 - `vw_activejobapplications` - Active job applications with details
 - `vw_candidateplacementhistory` - Candidate placement history
 
-### How to Import
-```sql
-mysql -u username -p database_name < database/schema/complete_database.sql
+
 ```
 
 ### Last Updated: December 2, 2025
