@@ -363,44 +363,57 @@ def show_jobs(conn):
                 if matching_candidates is not None and not matching_candidates.empty:
                     st.success(f"Found {len(matching_candidates)} matching candidates")
                     
-                    # Display with better formatting
+                    # Button: add all matching candidates to ELIGIBLE_CANDIDATES using stored procedure
+                    col_action, _ = st.columns([2, 8])
+                    with col_action:
+                        if st.button("➕ Add all matching candidates to Eligible", key=f"add_all_{selected_job_id}"):
+                            try:
+                                # Count existing eligible for this job before
+                                before_df = execute_query(conn, "SELECT COUNT(*) AS cnt FROM ELIGIBLE_CANDIDATES WHERE JobID = %s", params=(selected_job_id,))
+                                before_count = int(before_df['cnt'].iloc[0]) if before_df is not None and not before_df.empty else 0
+
+                                # Call stored procedure (p_job_id, p_min_match)
+                                cur = conn.cursor()
+                                cur.callproc('sp_insert_matching_candidates_for_job', [int(selected_job_id), int(min_match)])
+                                conn.commit()
+                                cur.close()
+
+                                # Count after to determine how many were inserted
+                                after_df = execute_query(conn, "SELECT COUNT(*) AS cnt FROM ELIGIBLE_CANDIDATES WHERE JobID = %s", params=(selected_job_id,))
+                                after_count = int(after_df['cnt'].iloc[0]) if after_df is not None and not after_df.empty else 0
+
+                                inserted = after_count - before_count
+                                if inserted > 0:
+                                    st.success(f"Inserted {inserted} new eligible candidate(s) for JobID {selected_job_id}.")
+                                else:
+                                    st.info("No new candidates inserted — all matched candidates were already present in ELIGIBLE_CANDIDATES.")
+
+                                # Refresh UI to reflect DB changes
+                                st.experimental_rerun()
+                            except mysql.connector.Error as db_err:
+                                st.error(f"Database error inserting eligible candidates: {db_err}")
+                            except Exception as e:
+                                st.error(f"Unexpected error: {e}")
+                    
+                    # Display list (read-only)
                     for idx, candidate in matching_candidates.iterrows():
                         with st.container(border=True):
                             col1, col2, col3 = st.columns([2, 1, 1])
                             
                             with col1:
                                 st.markdown(f"**👤 {candidate['CandidateName']}**")
-                                st.caption(f"📧 {candidate['Email']}")
-                                st.caption(f"📞 {candidate['Phone']}")
-                                st.caption(f"📍 {candidate['City']}, {candidate['State']}")
+                                st.caption(f"📧 {candidate.get('Email','')}")
+                                st.caption(f"📞 {candidate.get('Phone','')}")
+                                st.caption(f"📍 {candidate.get('City','')}, {candidate.get('State','')}")
                             
                             with col2:
-                                st.metric("Match %", f"{candidate['MatchPercentage']}%")
-                                st.metric("Skills", f"{candidate['MatchingSkills']}/{candidate['RequiredSkills']}")
+                                st.metric("Match %", f"{candidate.get('MatchPercentage', 0)}%")
+                                st.metric("Skills", f"{candidate.get('MatchingSkills', 0)}/{candidate.get('RequiredSkills', 0)}")
                             
                             with col3:
-                                if candidate['Skills'] != 'No matching skills':
+                                if candidate.get('Skills') and candidate['Skills'] != 'No matching skills':
                                     st.write("**Skills:**")
                                     st.caption(candidate['Skills'])
-
-                            # # Action buttons: Recommend (adds to ELIGIBLE_CANDIDATES as PENDING) and Reject (sets Rejected)
-                            # act_col1, act_col2 = st.columns([1,1])
-                            # with act_col1:
-                            #     if st.button("Recommend", key=f"recommend_{selected_job_id}_{candidate['CandidateID']}"):
-                            #         ok, err = upsert_eligible_candidate(conn, candidate['CandidateID'], selected_job_id, "PENDING")
-                            #         if ok:
-                            #             st.success("Candidate recommended (ApplicationStatus = PENDING).")
-                            #             st.experimental_rerun()
-                            #         else:
-                            #             st.error(f"Failed to recommend candidate: {err}")
-                            # with act_col2:
-                            #     if st.button("Reject", key=f"reject_{selected_job_id}_{candidate['CandidateID']}"):
-                            #         ok, err = upsert_eligible_candidate(conn, candidate['CandidateID'], selected_job_id, "Rejected")
-                            #         if ok:
-                            #             st.info("Candidate marked as Rejected.")
-                            #             st.experimental_rerun()
-                            #         else:
-                            #             st.error(f"Failed to mark Rejected: {err}")
                     
                     # Download option
                     csv = matching_candidates.to_csv(index=False)
