@@ -10,7 +10,7 @@ def get_connection():
             host="localhost",
             user="root",
             password="",
-            database="staffing_db",
+            database="Umang_Staffing_DB",
             port=3306
         )
         return conn

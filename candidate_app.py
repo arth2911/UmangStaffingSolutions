@@ -57,7 +57,7 @@ def main():
             "View Active Jobs",
             "My Skills",
             "Update Resume",
-            "Apply for Jobs",
+            # "Apply for Jobs",
             "My Applications"
         ])
     
@@ -143,7 +143,7 @@ def show_active_jobs(conn):
     # Build query
     query = """
         SELECT j.JobID, j.JobTitle, c.CompanyName, j.JobType, j.DatePosted, 
-               j.PayRate, j.Description
+               j.PayRate, j.JobDescription
         FROM JOBS j
         JOIN Clients c ON j.ClientID = c.ClientID
         WHERE j.IsOpen = 1
@@ -174,7 +174,7 @@ def show_my_skills(conn):
     
     # Get existing skills
     my_skills = execute_query(conn, """
-        SELECT s.SkillID, s.SkillName, cs.ProficiencyLevel
+        SELECT s.SkillName, cs.ProficiencyLevel
         FROM CANDIDATE_SKILLS cs
         JOIN Skills s ON cs.SkillID = s.SkillID
         WHERE cs.CandidateID = %s
@@ -250,50 +250,50 @@ def show_update_resume(conn):
         else:
             st.warning("Please enter a resume URL")
 
-def show_apply_for_jobs(conn):
-    """Apply for jobs"""
-    st.header("💼 Apply for Jobs")
+# def show_apply_for_jobs(conn):
+#     """Apply for jobs"""
+#     st.header("💼 Apply for Jobs")
     
-    # Get all open jobs
-    jobs = execute_query(conn, """
-        SELECT j.JobID, j.JobTitle, c.CompanyName, j.JobType, j.PayRate
-        FROM JOBS j
-        JOIN Clients c ON j.ClientID = c.ClientID
-        WHERE j.IsOpen = 1
-        ORDER BY j.DatePosted DESC
-    """)
+#     # Get all open jobs
+#     jobs = execute_query(conn, """
+#         SELECT j.JobID, j.JobTitle, c.CompanyName, j.JobType, j.PayRate
+#         FROM JOBS j
+#         JOIN Clients c ON j.ClientID = c.ClientID
+#         WHERE j.IsOpen = 1
+#         ORDER BY j.DatePosted DESC
+#     """)
     
-    if jobs is not None and not jobs.empty:
-        job_options = {f"{row['JobTitle']} - {row['CompanyName']} (${row['PayRate']:,.2f})": row['JobID'] 
-                      for _, row in jobs.iterrows()}
+#     if jobs is not None and not jobs.empty:
+#         job_options = {f"{row['JobTitle']} - {row['CompanyName']} (${row['PayRate']:,.2f})": row['JobID'] 
+#                       for _, row in jobs.iterrows()}
         
-        selected_job = st.selectbox("Select a Job to Apply:", options=list(job_options.keys()))
-        job_id = job_options[selected_job]
+#         selected_job = st.selectbox("Select a Job to Apply:", options=list(job_options.keys()))
+#         job_id = job_options[selected_job]
         
-        st.info("✅ Your application will be submitted with your current profile")
+#         st.info("✅ Your application will be submitted with your current profile")
         
-        if st.button("Submit Application", type="primary", use_container_width=True):
-            # Check if already applied
-            existing = execute_query(conn,
-                "SELECT * FROM vw_activejobapplications WHERE CandidateID = %s AND JobID = %s",
-                (st.session_state.candidate_id, job_id))
+#         if st.button("Submit Application", type="primary", use_container_width=True):
+#             # Check if already applied
+#             existing = execute_query(conn,
+#                 "SELECT * FROM vw_activejobapplications WHERE CandidateID = %s AND JobID = %s",
+#                 (st.session_state.candidate_id, job_id))
             
-            if existing is not None and not existing.empty:
-                st.warning("⚠️ You have already applied for this job")
-            else:
-                # Note: vw_activejobapplications is a view, so we need a table for applications
-                # Assuming there's a way to track applications (may need to create this)
-                st.success("✅ Application submitted successfully!")
-                st.balloons()
-    else:
-        st.info("No active jobs available at this moment")
+#             if existing is not None and not existing.empty:
+#                 st.warning("⚠️ You have already applied for this job")
+#             else:
+#                 # Note: vw_activejobapplications is a view, so we need a table for applications
+#                 # Assuming there's a way to track applications (may need to create this)
+#                 st.success("✅ Application submitted successfully!")
+#                 st.balloons()
+#     else:
+#         st.info("No active jobs available at this moment")
 
 def show_my_applications(conn):
     """View application status"""
     st.header("📝 My Applications")
     
     applications = execute_query(conn, """
-        SELECT JobID, JobTitle, CompanyName, ApplicationStatus
+        SELECT JobTitle, CompanyName, ApplicationStatus
         FROM vw_activejobapplications
         WHERE CandidateID = %s
         ORDER BY ApplicationStatus DESC
@@ -312,7 +312,7 @@ def show_my_applications(conn):
         col2.metric("Pending", pending)
         col3.metric("Accepted", accepted)
     else:
-        st.info("You haven't applied for any jobs yet")
+        st.info("No Applications yet")
 
 if __name__ == "__main__":
     main()
