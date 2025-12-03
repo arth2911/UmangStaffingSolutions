@@ -10,7 +10,7 @@ DB_CONFIG = {
     'port': 3306,
     'user': 'root',
     'password': '',
-    'database': 'UmangStaffingDatabase',
+    'database': 'Umang_Staffing_DB',
     'charset': 'utf8mb4',
     'autocommit': True
 }
