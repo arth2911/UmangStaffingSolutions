@@ -2,6 +2,7 @@ import streamlit as st
 import mysql.connector
 import pandas as pd
 from src.auth import check_login, show_logout_button
+import datetime
 
 # Page configuration
 st.set_page_config(
@@ -307,6 +308,25 @@ def show_jobs(conn):
                                 if candidate['Skills'] != 'No matching skills':
                                     st.write("**Skills:**")
                                     st.caption(candidate['Skills'])
+
+                            # # Action buttons: Recommend (adds to ELIGIBLE_CANDIDATES as PENDING) and Reject (sets Rejected)
+                            # act_col1, act_col2 = st.columns([1,1])
+                            # with act_col1:
+                            #     if st.button("Recommend", key=f"recommend_{selected_job_id}_{candidate['CandidateID']}"):
+                            #         ok, err = upsert_eligible_candidate(conn, candidate['CandidateID'], selected_job_id, "PENDING")
+                            #         if ok:
+                            #             st.success("Candidate recommended (ApplicationStatus = PENDING).")
+                            #             st.experimental_rerun()
+                            #         else:
+                            #             st.error(f"Failed to recommend candidate: {err}")
+                            # with act_col2:
+                            #     if st.button("Reject", key=f"reject_{selected_job_id}_{candidate['CandidateID']}"):
+                            #         ok, err = upsert_eligible_candidate(conn, candidate['CandidateID'], selected_job_id, "Rejected")
+                            #         if ok:
+                            #             st.info("Candidate marked as Rejected.")
+                            #             st.experimental_rerun()
+                            #         else:
+                            #             st.error(f"Failed to mark Rejected: {err}")
                     
                     # Download option
                     csv = matching_candidates.to_csv(index=False)
@@ -327,8 +347,12 @@ def find_matching_candidates(conn, job_id, min_match_percentage):
         cursor = conn.cursor(dictionary=True)
         cursor.callproc('sp_FindMatchingCandidates_v2', [job_id, min_match_percentage])
         
-        # Get results from first result set
-        results = cursor.fetchall()
+        # collect rows from any result sets returned by the procedure
+        results = []
+        for result in cursor.stored_results():
+            rows = result.fetchall()
+            if rows:
+                results.extend(rows)
         cursor.close()
         
         if results:
@@ -338,6 +362,10 @@ def find_matching_candidates(conn, job_id, min_match_percentage):
     except Exception as e:
         st.error(f"Error finding matching candidates: {e}")
         return None
+
+def upsert_eligible_candidate(conn, candidate_id, job_id, status):
+    """Recommend/Reject functionality removed — placeholder kept to avoid import errors."""
+    return False, "Recommend/Reject functionality removed from UI"
 
 def show_placements(conn):
     """Placements page"""
