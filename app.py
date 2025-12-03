@@ -259,7 +259,7 @@ def show_candidates(conn):
                 CONCAT(c.FirstName, ' ', c.LastName) AS CandidateName,
                 j.JobTitle,
                 Clients.CompanyName as ClientName,
-                CONCAT(h.FirstName, ' ', h.LastName) AS HRName,
+                # CONCAT(h.FirstName, ' ', h.LastName) AS HRName,
                 ec.ApplicationStatus,
                 ec.ApplyDate
             FROM ELIGIBLE_CANDIDATES ec
