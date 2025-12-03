@@ -156,11 +156,46 @@ def show_dashboard(conn):
         else:
             st.info("No recent placements")
 
-# ...existing code...
+def count_clients_by_industry(conn, industry):
+    """
+    Call stored procedure sp_CountClientsByIndustry(inIndustry, outCount).
+    Returns (count, None) on success or (None, error_msg) on failure.
+    Uses CALL ... @outVar then SELECT @outVar to read OUT parameter.
+    """
+    try:
+        cur = conn.cursor()
+        # Call proc with OUT variable stored in @outClientCount
+        cur.execute("CALL sp_CountClientsByIndustry(%s, @outClientCount)", (industry,))
+        # Read the OUT parameter
+        cur.execute("SELECT @outClientCount")
+        row = cur.fetchone()
+        cur.close()
+        count = int(row[0]) if row and row[0] is not None else 0
+        return count, None
+    except Exception as e:
+        try:
+            cur.close()
+        except:
+            pass
+        return None, str(e)
+
 def show_clients(conn):
     """Clients page"""
     st.header("🏢 Clients")
-    
+
+    # quick client count by industry widget (uses stored procedure)
+    with st.expander("🔎 Count clients by industry (uses stored procedure)"):
+        industry_input = st.text_input("Industry name (exact match):", "")
+        if st.button("Get client count"):
+            if not industry_input.strip():
+                st.warning("Enter industry name")
+            else:
+                cnt, err = count_clients_by_industry(conn, industry_input.strip())
+                if err:
+                    st.error(f"Error calling procedure: {err}")
+                else:
+                    st.success(f"Clients in '{industry_input.strip()}': {cnt}")
+
     # View selector + Add button
     view_col, action_col = st.columns([4,1])
     with view_col:
