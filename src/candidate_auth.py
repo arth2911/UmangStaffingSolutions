@@ -114,7 +114,7 @@ def display_candidate_login_page():
             font-weight: bold;
         }
         .stTabs [data-baseweb="tab-list"] {
-            gap: 1px;
+            gap: 24px;
         }
         </style>
     """, unsafe_allow_html=True)

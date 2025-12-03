@@ -58,7 +58,7 @@ def main():
             "My Skills",
             "Update Resume",
             # "Apply for Jobs",
-            "My Applications"
+            #"My Applications"
         ])
     
     # Get database connection
