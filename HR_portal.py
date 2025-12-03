@@ -37,6 +37,48 @@ def get_db_connection():
         st.error(f"Database connection error: {e}")
         return None
 
+
+def ensure_auto_close_trigger(conn):
+    """
+    Create or replace the trg_AutoCloseFilledJobs trigger which auto-closes jobs
+    when PLACEMENTS are inserted and vacancy rules are met.
+    """
+    try:
+        cursor = conn.cursor()
+        # Drop existing trigger if exists
+        cursor.execute("DROP TRIGGER IF EXISTS trg_AutoCloseFilledJobs")
+        # Create trigger
+        trigger_sql = """
+        CREATE TRIGGER `trg_AutoCloseFilledJobs` AFTER INSERT ON `PLACEMENTS`
+        FOR EACH ROW
+        BEGIN
+            DECLARE placement_count INT;
+            DECLARE job_type VARCHAR(50);
+            
+            -- Get job type and count placements
+            SELECT JobType INTO job_type
+            FROM JOBS WHERE JobID = NEW.JobID;
+            
+            SELECT COUNT(*) INTO placement_count
+            FROM PLACEMENTS WHERE JobID = NEW.JobID;
+            
+            -- Auto-close job based on type and placement count
+            IF (job_type IN ('Full-Time', 'Part-Time') AND placement_count >= 1) OR
+               (job_type IN ('Contract', 'Temporary') AND placement_count >= 3) THEN
+                UPDATE JOBS
+                SET IsOpen = 0
+                WHERE JobID = NEW.JobID;
+            END IF;
+        END
+        """
+        cursor.execute(trigger_sql)
+        conn.commit()
+        cursor.close()
+    except Exception as e:
+        # If trigger creation fails (e.g. insufficient privileges), log a warning to the UI
+        st.warning(f"Could not create trigger trg_AutoCloseFilledJobs: {e}")
+
+
 # Authentication function
 def authenticate_user(email):
     """Authenticate HR user by email"""
@@ -271,6 +313,9 @@ def view_candidates_page():
     
     conn = get_db_connection()
     if conn:
+        # Ensure trigger is present when we have a live connection (safe no-op if already exists)
+        ensure_auto_close_trigger(conn)
+
         cursor = conn.cursor(dictionary=True)
         
         # Get job details
@@ -332,13 +377,18 @@ def view_candidates_page():
                         col1, col2 = st.columns([3, 1])
                         
                         with col1:
-                            st.subheader(candidate['CandidateName'])
+                            # NEW: hide name when candidate is already Offered
+                            if candidate['ApplicationStatus'] == "Offered":
+                                st.subheader("Candidate name hidden (Offered)")
+                            else:
+                                st.subheader(candidate['CandidateName'])
+                            
                             st.write(f"📧 {candidate['Email']} | 📱 {candidate['Phone']}")
                             st.write(f"📍 {candidate['Location']}")
                             st.write(f"🎯 **Skills:** {candidate['Skills'] if candidate['Skills'] else 'Not specified'}")
                             st.write(f"📅 **Applied:** {candidate['ApplyDate']}")
                             
-                            # Resume link
+                            # Resume link (still available)
                             if candidate['ResumeURL']:
                                 st.markdown(f"[📄 View Resume]({candidate['ResumeURL']})")
                         
@@ -353,24 +403,106 @@ def view_candidates_page():
                             st.write(f"**Status:** {status_color.get(candidate['ApplicationStatus'], '⚪')} {candidate['ApplicationStatus']}")
                             
                             # Update status
+                            status_options = ["PENDING", "Interviewing", "Offered", "Rejected"]
+                            current_index = status_options.index(candidate['ApplicationStatus']) if candidate['ApplicationStatus'] in status_options else 0
                             new_status = st.selectbox(
                                 "Update Status",
-                                ["PENDING", "Interviewing", "Offered", "Rejected"],
-                                index=["PENDING", "Interviewing", "Offered", "Rejected"].index(candidate['ApplicationStatus']),
+                                status_options,
+                                index=current_index,
                                 key=f"status_{candidate['CandidateID']}"
                             )
                             
+                            # When HR clicks Update
                             if st.button("Update", key=f"update_{candidate['CandidateID']}"):
-                                update_cursor = conn.cursor()
-                                update_cursor.execute("""
-                                    UPDATE ELIGIBLE_CANDIDATES 
-                                    SET ApplicationStatus = %s
-                                    WHERE CandidateID = %s AND JOBID = %s
-                                """, (new_status, candidate['CandidateID'], st.session_state.selected_job_id))
-                                conn.commit()
-                                update_cursor.close()
-                                st.success(f"Status updated to {new_status}!")
-                                st.rerun()
+                                # If setting to Offered -> show placement form
+                                if new_status == "Offered":
+                                    # store details in session and show placement form
+                                    st.session_state['show_placement_form'] = True
+                                    st.session_state['placement_candidate_id'] = candidate['CandidateID']
+                                    st.session_state['placement_job_id'] = st.session_state.selected_job_id
+                                    st.session_state['placement_hr_id'] = st.session_state.hr_id
+                                    # Optional default final pay from job if available
+                                    st.session_state['placement_default_pay'] = job.get('PayRate') if job and 'PayRate' in job else 0.0
+                                    st.rerun()
+                                else:
+                                    # simple status update for other statuses
+                                    update_cursor = conn.cursor()
+                                    update_cursor.execute("""
+                                        UPDATE ELIGIBLE_CANDIDATES 
+                                        SET ApplicationStatus = %s
+                                        WHERE CandidateID = %s AND JOBID = %s
+                                    """, (new_status, candidate['CandidateID'], st.session_state.selected_job_id))
+                                    conn.commit()
+                                    update_cursor.close()
+                                    st.success(f"Status updated to {new_status}!")
+                                    st.rerun()
+                # end for-candidates loop
+
+                # Placement form (shown after clicking Update -> Offered)
+                if st.session_state.get('show_placement_form'):
+                    st.markdown("---")
+                    st.subheader("📝 Placement Details (Complete to record hire)")
+                    # Use a unique form name
+                    with st.form("placement_form"):
+                        # defaults
+                        default_start = datetime.today().date()
+                        default_hire = datetime.today().date()
+                        default_pay = float(st.session_state.get('placement_default_pay', 0.0) or 0.0)
+
+                        start_date = st.date_input("Start Date", value=default_start, key="placement_start")
+                        end_date = st.date_input("End Date (optional)", value=None, key="placement_end")
+                        final_pay = st.number_input("Final Pay Rate", min_value=0.0, value=default_pay, format="%.2f", key="placement_pay")
+                        hire_date = st.date_input("Hire Date", value=default_hire, key="placement_hire")
+
+                        submit_placement = st.form_submit_button("Create Placement")
+
+                    if st.button("Cancel Placement", key="cancel_placement"):
+                        # clear and return to candidates view
+                        st.session_state.pop('show_placement_form', None)
+                        st.session_state.pop('placement_candidate_id', None)
+                        st.session_state.pop('placement_job_id', None)
+                        st.session_state.pop('placement_hr_id', None)
+                        # st.experimental_rerun()
+
+                    if submit_placement:
+                        try:
+                            insert_cursor = conn.cursor()
+                            insert_sql = """
+                                INSERT INTO PLACEMENTS (JobID, CandidateID, HR_ID, StartDate, EndDate, FinalPayRate, HireDate)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """
+                            insert_cursor.execute(insert_sql, (
+                                st.session_state['placement_job_id'],
+                                st.session_state['placement_candidate_id'],
+                                st.session_state['placement_hr_id'],
+                                start_date.strftime("%Y-%m-%d"),
+                                end_date.strftime("%Y-%m-%d") if end_date else None,
+                                float(final_pay),
+                                hire_date.strftime("%Y-%m-%d")
+                            ))
+                            conn.commit()
+                            insert_cursor.close()
+
+                            # update ELIGIBLE_CANDIDATES status to Offered
+                            upd_cursor = conn.cursor()
+                            upd_cursor.execute("""
+                                UPDATE ELIGIBLE_CANDIDATES
+                                SET ApplicationStatus = %s
+                                WHERE CandidateID = %s AND JOBID = %s
+                            """, ("Offered", st.session_state['placement_candidate_id'], st.session_state['placement_job_id']))
+                            conn.commit()
+                            upd_cursor.close()
+
+                            st.success("Placement recorded and candidate status updated to Offered.")
+                        except Exception as e:
+                            st.error(f"Error creating placement: {e}")
+                        finally:
+                            # clear session state and refresh
+                            st.session_state.pop('show_placement_form', None)
+                            st.session_state.pop('placement_candidate_id', None)
+                            st.session_state.pop('placement_job_id', None)
+                            st.session_state.pop('placement_hr_id', None)
+                            # st.experimental_rerun()
             else:
                 st.info("No candidates found for this job with the selected filters.")
         
