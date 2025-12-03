@@ -219,6 +219,80 @@ def show_candidates(conn):
         st.metric("Total Candidates", len(df))
     else:
         st.info("No candidates found")
+    
+    st.divider()
+    st.subheader("🗂️ Eligible Candidates")
+    st.write("Shows candidates already added to ELIGIBLE_CANDIDATES with job, HR (if present), status and apply date.")
+    
+    # detect if ELIGIBLE_CANDIDATES has HR_ID column so we can LEFT JOIN HR if available
+    try:
+        col_check = execute_query(conn, """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'ELIGIBLE_CANDIDATES'
+              AND column_name = 'HR_ID'
+        """)
+        has_hr = bool(col_check['cnt'].iloc[0]) if col_check is not None else False
+    except Exception:
+        has_hr = False
+    
+    if has_hr:
+        eligible_sql = """
+            SELECT
+                ec.CandidateID,
+                CONCAT(c.FirstName, ' ', c.LastName) AS CandidateName,
+                j.JobTitle,
+                Clients.CompanyName as ClientName,
+                CONCAT(h.FirstName, ' ', h.LastName) AS HRName,
+                ec.ApplicationStatus,
+                ec.ApplyDate
+            FROM ELIGIBLE_CANDIDATES ec
+            JOIN Candidates c ON ec.CandidateID = c.CandidateID
+            JOIN JOBS j ON ec.JobID = j.JobID
+            JOIN Clients ON j.ClientID = Clients.ClientID
+            LEFT JOIN HR h ON ec.HR_ID = h.HR_ID
+            ORDER BY ec.ApplyDate DESC, ec.ApplicationStatus
+        """
+    else:
+        eligible_sql = """
+            SELECT
+                ec.CandidateID,
+                CONCAT(c.FirstName, ' ', c.LastName) AS CandidateName,
+                j.JobTitle,
+                NULL AS HRName,
+                ec.ApplicationStatus,
+                ec.ApplyDate
+            FROM ELIGIBLE_CANDIDATES ec
+            JOIN Candidates c ON ec.CandidateID = c.CandidateID
+            JOIN JOBS j ON ec.JobID = j.JobID
+            ORDER BY ec.ApplyDate DESC, ec.ApplicationStatus
+        """
+    
+    eligible_df = execute_query(conn, eligible_sql)
+    if eligible_df is not None and not eligible_df.empty:
+        # show human-friendly column names
+        eligible_df = eligible_df.rename(columns={
+            'CandidateID': 'Candidate ID',
+            'CandidateName': 'Candidate',
+            'JobTitle': 'Job Title',
+            'HRName': 'HR',
+            'ClientName': 'Client',
+            'ApplicationStatus': 'Status',
+            'ApplyDate': 'Apply Date'
+        })
+        st.dataframe(eligible_df, use_container_width=True, hide_index=True)
+        
+        csv = eligible_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Eligible Candidates",
+            data=csv,
+            file_name="eligible_candidates.csv",
+            mime="text/csv"
+        )
+        st.metric("Total Eligible Records", len(eligible_df))
+    else:
+        st.info("No eligible candidate records found")
 
 def show_jobs(conn):
     """Jobs page"""
