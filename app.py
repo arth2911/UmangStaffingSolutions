@@ -19,6 +19,9 @@ check_login()
 if 'show_add_hr' not in st.session_state:
 
     st.session_state['show_add_hr'] = False
+# NEW: flag for Add Client form
+if 'show_add_client' not in st.session_state:
+    st.session_state['show_add_client'] = False
 # Database connection function
 @st.cache_resource
 def get_connection():
@@ -153,13 +156,24 @@ def show_dashboard(conn):
         else:
             st.info("No recent placements")
 
+# ...existing code...
 def show_clients(conn):
     """Clients page"""
     st.header("🏢 Clients")
     
-    # View selector
-    view_type = st.selectbox("Select View:", ["All Clients", "Technology Clients"])
-    
+    # View selector + Add button
+    view_col, action_col = st.columns([4,1])
+    with view_col:
+        view_type = st.selectbox("Select View:", ["All Clients", "Technology Clients"])
+    with action_col:
+        if st.button("➕ Add New Client"):
+            st.session_state['show_add_client'] = True
+
+    # If form toggled, show form and return
+    if st.session_state.get('show_add_client'):
+        show_add_client(conn)
+        return
+
     if view_type == "All Clients":
         query = "SELECT * FROM Clients ORDER BY CompanyName"
     else:
@@ -182,6 +196,7 @@ def show_clients(conn):
         st.metric("Total Clients", len(df))
     else:
         st.info("No clients found")
+# ...existing code...
 
 def show_candidates(conn):
     """Candidates page"""
@@ -541,6 +556,65 @@ def show_hr(conn):
 #         else:
 #             st.error("Failed to create HR record. See error message above.")
 
+def add_client_to_db(conn, company_name, industry, contact_person, contact_email, contact_phone):
+    """Insert a new client into Clients table. Returns (True, client_id) or (False, error_msg)."""
+    try:
+        cur = conn.cursor()
+        sql = """
+            INSERT INTO Clients (CompanyName, Industry, ContactPerson, ContactEmail, ContactPhone)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cur.execute(sql, (company_name, industry, contact_person, contact_email, contact_phone))
+        conn.commit()
+        client_id = cur.lastrowid if hasattr(cur, "lastrowid") else None
+        cur.close()
+        return True, client_id
+    except Exception as e:
+        try:
+            cur.close()
+        except:
+            pass
+        return False, str(e)
+
+def show_add_client(conn):
+    """Form to add a new Client record"""
+    st.header("➕ Add New Client")
+    with st.form("add_client_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            company_name = st.text_input("Company Name", "")
+            industry = st.text_input("Industry", "")
+        with col2:
+            contact_person = st.text_input("Contact Person", "")
+            contact_email = st.text_input("Contact Email", "")
+            contact_phone = st.text_input("Contact Phone", "")
+
+        submit = st.form_submit_button("Create Client")
+        cancel = st.form_submit_button("Cancel", help="Cancel and return to Clients list")
+
+    # Cancel handling (separate check so both buttons present)
+    if cancel:
+        st.session_state['show_add_client'] = False
+        st.experimental_rerun()
+
+    if submit:
+        if not company_name.strip():
+            st.warning("Company Name is required.")
+            return
+        ok, info = add_client_to_db(
+            conn,
+            company_name.strip(),
+            industry.strip(),
+            contact_person.strip(),
+            contact_email.strip(),
+            contact_phone.strip()
+        )
+        if ok:
+            st.success(f"Client added (ID: {info}).")
+            st.session_state['show_add_client'] = False
+            st.experimental_rerun()
+        else:
+            st.error(f"Failed to add client: {info}")
 
 def show_custom_query(conn):
     """Custom SQL query page"""
